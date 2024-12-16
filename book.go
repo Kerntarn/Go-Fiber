@@ -14,6 +14,16 @@ type Book struct {
 
 var books []Book
 
+// Handler functions
+// getBooks godoc
+// @Summary Get all books
+// @Description Get details of all books
+// @Tags books
+// @Accept  json
+// @Produce  json
+// @Security ApiKeyAuth
+// @Success 200 {array} Book
+// @Router /books [get]
 func getBooks(c *fiber.Ctx) error {
 	return c.JSON(books)
 }
