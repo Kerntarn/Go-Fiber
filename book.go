@@ -9,6 +9,7 @@ import (
 type Book struct {
 	ID     int    `json:"id"`
 	Title  string `json:"title"`
+	Price  int    `json:"price"`
 	Author string `json:"author"`
 }
 
@@ -65,6 +66,7 @@ func updateBook(c *fiber.Ctx) error {
 		if book.ID == bookId {
 			books[i].Title = bookUpdate.Title
 			books[i].Author = bookUpdate.Author
+			books[i].Price = bookUpdate.Price
 			return c.JSON(book)
 		}
 	}
