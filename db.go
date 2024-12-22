@@ -1,11 +1,15 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"time"
 
 	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -16,72 +20,76 @@ const (
 	password = "mypassword"
 )
 
-var db *sql.DB
+var db *gorm.DB
 
 func dbInit() {
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+"password=%s dbname=%s sslmode=disable\n", host, port, username, password, dbname)
+	newLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold: time.Second,
+			LogLevel:      logger.Info,
+			Colorful:      true,
+		},
+	)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s "+"password=%s dbname=%s sslmode=disable\n", host, port, username, password, dbname)
 
-	print(psqlInfo)
+	ldb, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: newLogger})
+	if err != nil {
+		panic("failed to connect to database")
+	}
 
-	ldb, err := sql.Open("postgres", psqlInfo)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = ldb.Ping()
-	if err != nil {
-		log.Fatal(err)
-	}
 	db = ldb
-	fmt.Println("Database Connection: Success")
 
-	book, err := dbUpdateBook(&Book{Title: "Demon Slayer", Price: 310}, 1)
+	db.AutoMigrate(&Book{}, &User{})
+	fmt.Println("Database migration completed!")
 
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(book)
 }
 
 func dbCreateBook(book *Book) error {
-	_, err := db.Exec( //Not Return anything
-		"INSERT INTO public.books(title, price) VALUES ($1, $2);",
-		book.Title,
-		book.Price,
-	)
+	result := db.Create(book)
+	if result.Error != nil {
+		return result.Error
+	}
 
-	return err
+	fmt.Println("Create Book Successful")
+	return nil
 }
 
 func dbGetBook(id int) (Book, error) {
 	var b Book
-	row := db.QueryRow("SELECT id, title, price FROM books WHERE id=$1;", id)
-	err := row.Scan(&b.ID, &b.Title, &b.Price)
-	if err != nil {
-		return Book{}, err
+	result := db.First(&b, id)
+	if result.Error != nil {
+		return Book{}, result.Error
 	}
 	return b, nil
 }
 
-func dbUpdateBook(book *Book, id int) (Book, error) {
-	var b Book
-	row := db.QueryRow( //Return Data
-		"UPDATE public.books SET title=$1, price=$2 WHERE id=$3 RETURNING id, title, price;",
-		book.Title,
-		book.Price,
-		id,
-	)
-	err := row.Scan(&b.ID, &b.Title, &b.Price)
-	if err != nil {
-		return Book{}, err
+func dbUpdateBook(book *Book) error {
+	result := db.Model(&book).Updates(book)
+
+	if result.Error != nil {
+		return result.Error
 	}
-	return b, err
+	return nil
 }
 
 func dbDeleteBook(id int) error {
-	_, err := db.Exec( //Not Return anything
-		"DELETE FROM public.books WHERE id=$1;",
-		id,
-	)
+	var b Book
+	result := db.Delete(&b, id)
 
-	return err
+	if result.Error != nil {
+		return result.Error
+	}
+
+	return nil
+}
+
+func dbGetBooks() ([]Book, error) {
+	var books []Book
+	result := db.Find(&books)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return books, nil
 }

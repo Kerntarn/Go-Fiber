@@ -4,16 +4,15 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 type Book struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Price  int    `json:"price"`
-	Author string `json:"author"`
+	gorm.Model
+	Title     string `json:"title"`
+	Price     int    `json:"price"`
+	Author_ID int    `json:"author"`
 }
-
-var books []Book
 
 // Handler functions
 // getBooks godoc
@@ -26,19 +25,23 @@ var books []Book
 // @Success 200 {array} Book
 // @Router /books [get]
 func getBooks(c *fiber.Ctx) error {
+
+	books, err := dbGetBooks()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
 	return c.JSON(books)
 }
 func getBook(c *fiber.Ctx) error {
 	bookId, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+		return c.SendStatus(fiber.StatusBadRequest)
 	}
-	for _, book := range books {
-		if book.ID == bookId {
-			return c.JSON(book)
-		}
+	book, err := dbGetBook(bookId)
+	if err != nil {
+		return c.SendStatus(fiber.StatusBadRequest)
 	}
-	return c.SendStatus(fiber.StatusNotFound)
+	return c.JSON(book)
 }
 
 func createBook(c *fiber.Ctx) error {
@@ -47,7 +50,10 @@ func createBook(c *fiber.Ctx) error {
 	if err := c.BodyParser(book); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	books = append(books, *book)
+
+	if err := dbCreateBook(book); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
+	}
 	return c.JSON(book)
 }
 
@@ -61,16 +67,13 @@ func updateBook(c *fiber.Ctx) error {
 	if err := c.BodyParser(bookUpdate); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-
-	for i, book := range books {
-		if book.ID == bookId {
-			books[i].Title = bookUpdate.Title
-			books[i].Author = bookUpdate.Author
-			books[i].Price = bookUpdate.Price
-			return c.JSON(book)
-		}
+	bookUpdate.ID = uint(bookId)
+	if err := dbUpdateBook(bookUpdate); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	return c.SendStatus(fiber.StatusNotFound)
+	return c.JSON(fiber.Map{
+		"message": "Update Book successful",
+	})
 }
 
 func deleteBook(c *fiber.Ctx) error {
@@ -79,11 +82,8 @@ func deleteBook(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
 
-	for i, book := range books {
-		if book.ID == bookId {
-			books = append(books[:i], books[i+1:]...)
-			return c.SendStatus(fiber.StatusNoContent)
-		}
+	if err := dbDeleteBook(bookId); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	return c.SendStatus(fiber.StatusNotFound)
+	return c.SendStatus(fiber.StatusNoContent)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -8,11 +9,11 @@ import (
 	_ "github.com/Kerntarn/Go-Fiber/docs" // load generated docs
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	jwtware "github.com/gofiber/jwt/v2"
 	"github.com/gofiber/swagger"
 	"github.com/gofiber/template/html/v2"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // @title Book API
@@ -33,6 +34,7 @@ func srv() {
 	app := fiber.New(fiber.Config{
 		Views: engine,
 	})
+	app.Use("/books", authRequired)
 
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
@@ -42,15 +44,12 @@ func srv() {
 
 	app.Get("/swagger/*", swagger.HandlerDefault)
 
-	books = append(books, Book{ID: 1, Title: "Demon Slayer", Author: "A Sensei"})
-	books = append(books, Book{ID: 2, Title: "One Piece", Author: "B Sensei"})
-
+	app.Post("/register", register)
 	app.Post("/login", login)
 
-	app.Use(jwtware.New(jwtware.Config{
-		SigningKey: []byte(os.Getenv("JWT_SECRET")),
-	}))
-	app.Use(checkMiddleware)
+	// app.Use(jwtware.New(jwtware.Config{
+	// 	SigningKey: []byte(os.Getenv("JWT_SECRET")),
+	// }))
 
 	app.Get("/books", getBooks)
 	app.Get("/books/:id", getBook)
@@ -76,50 +75,71 @@ func uploadFile(c *fiber.Ctx) error {
 	return c.SendString("File's uploaded completely")
 }
 
-func renderTemplate(c *fiber.Ctx) error {
-	// Render the template with variable data
-	return c.Render("template", fiber.Map{
-		"Name": "World",
+func authRequired(c *fiber.Ctx) error {
+	cookie := c.Cookies("jwt")
+	t, err := jwt.ParseWithClaims(cookie, jwt.MapClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_SECRET")), nil
 	})
-}
-
-type User = struct {
-	Email    string `json:email`
-	Password string `json:password`
-}
-
-var usr = User{Email: "123@gmail.com", Password: "pwd1234"}
-
-func checkMiddleware(c *fiber.Ctx) error {
-	user := c.Locals("user").(*jwt.Token)
-	claims := user.Claims.(jwt.MapClaims)
-	if claims["role"] != "member" {
-		return fiber.ErrUnauthorized
+	if err != nil || !t.Valid {
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
+
+	claim := t.Claims.(jwt.MapClaims)
+
+	fmt.Println(claim)
 	return c.Next()
 }
 
 func login(c *fiber.Ctx) error {
 	user := new(User)
+	userInDb := new(User)
 	if err := c.BodyParser(user); err != nil {
 		return c.Status(fiber.StatusBadRequest).SendString(err.Error())
 	}
-	if user.Email != usr.Email || user.Password != usr.Password {
-		return fiber.ErrUnauthorized
-	}
-	token := jwt.New(jwt.SigningMethodHS256)
 
+	result := db.Where("email = ?", user.Email).First(userInDb)
+	if result.Error != nil {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+
+	if err := bcrypt.CompareHashAndPassword(
+		[]byte(userInDb.Password), []byte(user.Password)); err != nil {
+		return c.SendStatus(fiber.StatusUnauthorized)
+	}
+
+	token := jwt.New(jwt.SigningMethodHS256)
 	claims := token.Claims.(jwt.MapClaims)
-	claims["email"] = user.Email
-	claims["role"] = "admin"
+	claims["user_id"] = userInDb.ID
 	claims["exp"] = time.Now().Add(time.Hour * 72).Unix()
 
 	t, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	if err != nil {
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "jwt",
+		Value:    t,
+		Expires:  time.Now().Add(time.Hour * 72),
+		HTTPOnly: true,
+	})
+
 	return c.JSON(fiber.Map{
 		"message": "Login Success",
 		"token":   t,
+	})
+}
+
+func register(c *fiber.Ctx) error {
+	user := new(User)
+	if err := c.BodyParser(user); err != nil {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+
+	if err := dbCreateUser(user); err != nil {
+		return c.SendStatus(fiber.StatusBadRequest)
+	}
+	return c.JSON(fiber.Map{
+		"message": "Register Successful",
 	})
 }
